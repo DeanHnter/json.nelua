@@ -83,20 +83,19 @@ local function token_type_tostring(ttype: TokenType)
   end
 end
 
--- Define a helper that increments an integer via its pointer.
 local function advance_index_ptr(p: *integer)
   $p = $p + 1
 end
 
 local function tokenize(str: string)
-  local tokens:sequence(Token)
+  local tokens = (@sequence(Token))()
   local index = 1
 
   while index <= #str do
     local current_char = str:sub(index, index)
     if current_char == "[" then
       tokens:push({ val = current_char, type = TokenType.OPEN_BRACKET, start_pos = index, end_pos = index })
-      advance_index_ptr(&index)  -- increment index
+      advance_index_ptr(&index)
     elseif current_char == "]" then
       tokens:push({ val = current_char, type = TokenType.CLOSE_BRACKET, start_pos = index, end_pos = index })
       advance_index_ptr(&index)
@@ -126,7 +125,7 @@ local function tokenize(str: string)
     elseif current_char == '"' then
       local s_pos = index
       local val = ""
-      advance_index_ptr(&index)  -- skip the starting "
+      advance_index_ptr(&index)
       while index <= #str and str:sub(index, index) ~= '"' do
         local ch = str:sub(index, index)
         if ch == "\\" then
@@ -140,7 +139,7 @@ local function tokenize(str: string)
         end
       end
       val = unescape_str(val)
-      advance_index_ptr(&index)  -- skip the ending "
+      advance_index_ptr(&index)
       tokens:push({ val = val, type = TokenType.STRING, start_pos = s_pos, end_pos = index - 1 })
     elseif current_char:match("[%-%d]") then
       local s_pos = index
@@ -287,12 +286,13 @@ function Parser.new(content: string): (boolean, Parser, string)
     return false, (@Parser)(), err
   end
 
-  local parser: Parser
+  io.write("DEBUG: Total tokens = ", #tokens, "\n")
 
+  local parser = (@Parser)()
   parser.content = content
   parser.tokens = tokens
   parser.index = 1
-
+  
   return true, parser, ""
 end
 
@@ -347,16 +347,16 @@ Parser.parse_from_token = function(self:Parser, token: Token)
       return JsonNode.new(JsonNodeType.STRING, val)
     case TokenType.NUMBER then
       local val = token.val
-      self:advance() 
+      self:advance()
       return JsonNode.new(JsonNodeType.NUMBER, val)
     case TokenType.NULL then
-      self:advance() 
+      self:advance()
       return JsonNode.new(JsonNodeType.NULL, (@niltype)())
     case TokenType.TRUE then
-      self:advance() 
+      self:advance()
       return JsonNode.new(JsonNodeType.BOOLEAN, true)
     case TokenType.FALSE then
-      self:advance() 
+      self:advance()
       return JsonNode.new(JsonNodeType.BOOLEAN, false)
     else
       return false, (@JsonNode)({}), ("UNIMPLEMENTED: `%s`"):format(token_type_tostring(token.type))
@@ -364,7 +364,7 @@ Parser.parse_from_token = function(self:Parser, token: Token)
 end
 
 Parser.parse_array = function(self: Parser): (boolean, JsonNode, string)
-  local arr: sequence(JsonNode)
+  local arr = (@sequence(JsonNode))()
   
   if self:peek().type ~= TokenType.OPEN_BRACKET then
     return false, (@JsonNode)({}), ("Expected `OPEN_BRACKET`, got `%s`"):format(token_type_tostring(self:peek().type))
@@ -383,14 +383,19 @@ Parser.parse_array = function(self: Parser): (boolean, JsonNode, string)
     end
     
     arr:push(val)
-
-    if self:peek().type == TokenType.CLOSE_BRACKET then
+    
+    if self:peek().type == TokenType.COMMA then
+      self:advance()
+      if self:peek().type == TokenType.CLOSE_BRACKET then
+        self:advance()
+        break
+      end
+    elseif self:peek().type == TokenType.CLOSE_BRACKET then
       self:advance()
       break
-    elseif self:peek().type ~= TokenType.COMMA then
+    else
       return false, (@JsonNode)({}), ("Expected `COMMA` or `CLOSE_BRACKET`, got `%s`"):format(token_type_tostring(self:peek().type))
     end
-    self:advance()
   end
 
   return JsonNode.new(JsonNodeType.ARRAY, arr)
@@ -399,7 +404,7 @@ end
 -- TODO: Properly show errors on trailing commas
 -- TODO: Handle missing commas between fields
 Parser.parse_object = function(self: Parser): (boolean, JsonNode, string)
-  local obj: hashmap(string, JsonNode)
+  local obj = (@hashmap(string, JsonNode))()
   if self:peek().type ~= TokenType.OPEN_BRACE then
     return false, (@JsonNode)({}), ("Expected `OPEN_BRACE`, got `%s`"):format(token_type_tostring(self:peek().type))
   end
@@ -411,6 +416,7 @@ Parser.parse_object = function(self: Parser): (boolean, JsonNode, string)
   end
 
   local current_token = self:peek()
+  io.write("DEBUG: Expecting key, current token = ", token_type_tostring(current_token.type), " (", current_token.val, ")\n")
   if current_token.type ~= TokenType.STRING then
     local line, char = pos_to_line_char(current_token.start_pos, self.content)
     return false, (@JsonNode)({}), ("Expected object key `STRING` at line %d, character %d, got `%s`"):format(
@@ -427,19 +433,23 @@ Parser.parse_object = function(self: Parser): (boolean, JsonNode, string)
   end
   self:advance()
 
+  io.write("DEBUG: Before parsing value, self.index = ", self.index, ", token = ", token_type_tostring(self:peek().type), "\n")
   local ok, val, err = self:parse_from_token(self:peek())
   if not ok then
       return ok, (@JsonNode)({}), err
   end
   obj[key] = val
 
+  io.write("DEBUG: After first property, self.index = ", self.index, ", token = ", token_type_tostring(self:peek().type), "\n")
+
   while true do
     if self:peek().type == TokenType.COMMA then
       self:advance()
       if self:peek().type == TokenType.CLOSE_BRACE then
+        self:advance()
         break
       end
-
+      io.write("DEBUG: After comma, expecting next key, current token = ", token_type_tostring(self:peek().type), " (", self:peek().val, ")\n")
       current_token = self:peek()
       if current_token.type ~= TokenType.STRING then
         local line, char = pos_to_line_char(current_token.start_pos, self.content)
@@ -467,7 +477,9 @@ Parser.parse_object = function(self: Parser): (boolean, JsonNode, string)
     end
   end
 
-  self:advance()
+  if self:peek().type == TokenType.CLOSE_BRACE then
+    self:advance()
+  end
 
   return JsonNode.new(JsonNodeType.OBJECT, obj)
 end
@@ -515,7 +527,7 @@ local function pretty_print(node: JsonNode, indent: integer)
 end
 
 local function count_nodes(node: JsonNode): integer
-  local count: integer = 1  -- count the current node
+  local count: integer = 1
   if node.type == JsonNodeType.OBJECT then
     for key, child in pairs(node.val.obj) do
       count = count + count_nodes(child)
@@ -528,9 +540,10 @@ local function count_nodes(node: JsonNode): integer
   return count
 end
 
+
 local file, err = io.open("test.json")
 assert(file:isopen(), ("Failed to open file: %s"):format(err))
-local content, err = file:read("a")
+local content, err = file:read("*a")
 assert(err == "", err)
 local ok, parser, err = Parser.new(content)
 assert(ok, err)
