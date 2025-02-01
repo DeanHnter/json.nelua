@@ -487,65 +487,55 @@ end
 local function pretty_print(node: JsonNode, indent: integer)
   indent = indent or 0
   local indent_str = repeat_str("  ", indent)
-
-  switch node.type do
-    case JsonNodeType.OBJECT then
-      io.write("{\n")
-      local first = true
-      for key, value in pairs(node.val.obj) do
-        if not first then
-          io.write(",\n")
-        end
-        first = false
-        io.write(indent_str .. "  \"" .. key .. "\": ")
-        pretty_print(value, indent + 1)
-      end
-      if not first then
-        io.write("\n")
-      end
-      io.write(indent_str .. "}")
-
-    case JsonNodeType.ARRAY then
-      io.write("[\n")
-      local first = true
-      for i, value in ipairs(node.val.arr) do
-        if not first then
-          io.write(",\n")
-        end
-        first = false
-        io.write(indent_str .. "  ")
-        pretty_print(value, indent + 1)
-      end
-      if not first then
-        io.write("\n")
-      end
-      io.write(indent_str .. "]")
-
-    case JsonNodeType.STRING then
-      io.write("\"" .. node.val.str .. "\"")
-
-    case JsonNodeType.NUMBER then
-      io.write(tostring(node.val.num))
-
-    case JsonNodeType.BOOLEAN then
-      io.write(tostring(node.val.bol))
-
-    case JsonNodeType.NULL then
-      io.write("null")
-
-    else
-      io.write("\"<unknown>\"")
+  io.write(indent_str, "(", json_node_type_tostring(node.type), ") ")
+  if node.type == JsonNodeType.OBJECT then
+    io.write("{\n")
+    for key, value in pairs(node.val.obj) do
+      io.write(indent_str .. "  ", "\"" .. key .. "\":\n")
+      pretty_print(value, indent + 2)
+    end
+    io.write(indent_str, "}\n")
+  elseif node.type == JsonNodeType.ARRAY then
+    io.write("[\n")
+    for i, value in ipairs(node.val.arr) do
+      pretty_print(value, indent + 1)
+    end
+    io.write(indent_str, "]\n")
+  elseif node.type == JsonNodeType.STRING then
+    io.write("\"" .. node.val.str .. "\"\n")
+  elseif node.type == JsonNodeType.NUMBER then
+    io.write(tostring(node.val.num) .. "\n")
+  elseif node.type == JsonNodeType.BOOLEAN then
+    io.write(tostring(node.val.bol) .. "\n")
+  elseif node.type == JsonNodeType.NULL then
+    io.write("null\n")
+  else
+    io.write("\"<unknown>\"\n")
   end
-  io.write("\n")
+end
+
+local function count_nodes(node: JsonNode): integer
+  local count: integer = 1  -- count the current node
+  if node.type == JsonNodeType.OBJECT then
+    for key, child in pairs(node.val.obj) do
+      count = count + count_nodes(child)
+    end
+  elseif node.type == JsonNodeType.ARRAY then
+    for i, child in ipairs(node.val.arr) do
+      count = count + count_nodes(child)
+    end
+  end
+  return count
 end
 
 local file, err = io.open("test.json")
 assert(file:isopen(), ("Failed to open file: %s"):format(err))
 local content, err = file:read("a")
 assert(err == "", err)
-print(content)
 local ok, parser, err = Parser.new(content)
 assert(ok, err)
 local ok, node, err = parser:parse()
 assert(ok, err)
+local total_nodes = count_nodes(node)
+io.write("Total nodes: ", total_nodes, "\n")
 pretty_print(node, 0)
